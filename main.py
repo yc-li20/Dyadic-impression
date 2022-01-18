@@ -7,93 +7,78 @@ import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
+from sklearn.metrics import f1_score
 from audtorch.metrics.functional import concordance_cc
 from torch.utils.data import TensorDataset, DataLoader
 
-# process stimuli features
+# data preparation
 with open('/Users/liyuanchao/Documents/Corpus/IMPRESSION/feats_labels/feats_stimuli/sti.csv') as sti:
     file_content = csv.reader(sti, delimiter=',')
     headers = next(file_content, None)
     feats_sti = list(file_content)
-feats_sti = np.array(feats_sti, dtype=float)
-feats_sti -= np.mean(feats_sti, axis = 0)
-feats_sti /= (np.std(feats_sti, axis = 0) + 0.0001)
-feats_sti = torch.from_numpy(feats_sti)
 
-# process participant features
-feats_train = []
-ind_train = []
-comp_train = []
-warm_train = []
-feats_valid = []
-ind_valid = []
-comp_valid = []
-warm_valid = []
+feats_par = []
+ind = []
+comp = []
+warm = []
 
 path_feats = '/Users/liyuanchao/Documents/Corpus/IMPRESSION/feats_labels/feats_participant/'
 path_labels = '/Users/liyuanchao/Documents/Corpus/IMPRESSION/feats_labels/labels/'
 
-
 os.chdir(path_feats)
-for file in range(32): #change number for cross-validation
+for file in range(39):
     with open(str(file) + '.csv') as par:
         file_content = csv.reader(par, delimiter=',')
         headers = next(file_content, None)
         for row in list(file_content):
-            feats_train.append(row[:-1])
-            ind_train.append(row[-1])
-for file in range(32, 40): #change number for cross-validation
-    with open(str(file) + '.csv') as par:
-        file_content = csv.reader(par, delimiter=',')
-        headers = next(file_content, None)
-        for row in list(file_content):
-            feats_valid.append(row[:-1])
-            ind_valid.append(row[-1])            
+            feats_par.append(row[:-1])
+            ind.append(row[-1])
 
 os.chdir(path_labels)
-for file in range(32): #change number for cross-validation
+for file in range(39):
     with open(str(file) + '.csv') as label:
         file_content = csv.reader(label, delimiter=',')
         headers = next(file_content, None)
         for row in list(file_content):
-            comp_train.append(row[0])
-            warm_train.append(row[1])
-for file in range(32, 40): #change number for cross-validation
-    with open(str(file) + '.csv') as label:
-        file_content = csv.reader(label, delimiter=',')
-        headers = next(file_content, None)
-        for row in list(file_content):
-            comp_valid.append(row[0])
-            warm_valid.append(row[1])
+            comp.append(row[0])
+            warm.append(row[1])
             
-feats_train = np.array(feats_train, dtype=float)
-comp_train = np.array(comp_train, dtype=float)
-warm_train = np.array(warm_train, dtype=float)
-ind_train = np.array(ind_train, dtype=int)
-feats_valid = np.array(feats_valid, dtype=float)
-comp_valid = np.array(comp_valid, dtype=float)
-warm_valid = np.array(warm_valid, dtype=float)
-ind_valid = np.array(ind_valid, dtype=int)
-
-torch.manual_seed(1)
+feats_par = np.array(feats_par, dtype=float)
+feats_sti = np.array(feats_sti, dtype=float)
+comp = np.array(comp, dtype=float)
+warm = np.array(warm, dtype=float)
+ind = np.array(ind, dtype=int)
 
 # shuffle data
-leng = len(feats_train)
+leng = len(feats_par)
 indices = np.arange(leng)
 random.shuffle(indices)
-feats_train[np.arange(leng)] = feats_train[indices]
-comp_train[np.arange(leng)] = comp_train[indices]
-warm_train[np.arange(leng)] = warm_train[indices]
-ind_train[np.arange(leng)] = ind_train[indices]
+feats_par[np.arange(leng)] = feats_par[indices]
+comp[np.arange(leng)] = comp[indices]
+warm[np.arange(leng)] = warm[indices]
+ind[np.arange(leng)] = ind[indices]
+
+# separate training and validation data
+feats_train = feats_par[:int(0.8*leng)]
+feats_valid = feats_par[int(0.8*leng):]
+comp_train = comp[:int(0.8*leng)]
+comp_valid = comp[int(0.8*leng):]
+warm_train = warm[:int(0.8*leng)]
+warm_valid = warm[int(0.8*leng):]
+ind_train = ind[:int(0.8*leng)]
+ind_valid = ind[int(0.8*leng):]
 
 # normalization
 feats_train -= np.mean(feats_train, axis = 0)
-feats_train /= (np.std(feats_train, axis = 0) + 0.0001)
+feats_train /= (np.std(feats_train, axis = 0) + 0.001)
 feats_valid -= np.mean(feats_valid, axis = 0)
-feats_valid /= (np.std(feats_valid, axis = 0) + 0.0001)
+feats_valid /= (np.std(feats_valid, axis = 0) + 0.001)
+feats_sti -= np.mean(feats_sti, axis = 0)
+feats_sti /= (np.std(feats_sti, axis = 0) + 0.001)
 
 feats_train = torch.from_numpy(feats_train)
 feats_valid = torch.from_numpy(feats_valid)
+feats_sti = torch.from_numpy(feats_sti)
 ind_train = torch.from_numpy(ind_train)
 ind_valid = torch.from_numpy(ind_valid)
 comp_train = torch.from_numpy(comp_train)
@@ -116,7 +101,7 @@ print('Data preparation completed!')
 class NeuralNet(nn.Module):
     def __init__(self):
         super(NeuralNet, self).__init__()
-        self.lstm1 = nn.LSTM(input_size=len(feats_train[0]),
+        self.lstm1 = nn.LSTM(input_size=len(feats_par[0]),
                             hidden_size=64,
                             num_layers=2,
                             batch_first=True,
@@ -160,7 +145,8 @@ class NeuralNet(nn.Module):
         comp = self.out(x_co)
         warm = self.out(x_co)
         return comp, warm, loss_dis1, loss_dis2, loss_sim1, loss_sim2
-      
+    
+torch.manual_seed(1)
 model = NeuralNet()
 model = model.to(torch.float64)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -175,8 +161,10 @@ cross_loss_valid = []
 sim_loss_valid = []
 dis_loss_valid = []
 
+best_loss = 9.0
+
 # training
-for epoch in range(50):
+for epoch in range(60):
     start = timeit.default_timer()
     print("-----epoch: ", epoch, "-----")
     comp_loss_list_train = []
@@ -225,7 +213,7 @@ for epoch in range(50):
         optimizer.step()
     print('--training ends--')
 
-# validation
+#     # validation
     print('--validation begins--')
     model.eval()
     input_par = feats_valid
@@ -294,8 +282,12 @@ for epoch in range(50):
     stop = timeit.default_timer()
     print('Time: ', stop - start)
     scheduler.step()
-    
-# plot loss fig
+
+    if train_loss_comp+train_loss_warm < best_loss:
+        best_loss = train_loss_comp+train_loss_warm
+        torch.save(model, '/Users/liyuanchao/Desktop/phdwork/IMPRESSION/model_' + str(epoch) + '.pt')
+        print('model saved')
+        
 plt.plot(sim_loss_train, label="train", color="red")
 plt.plot(sim_loss_valid, label="valid", color="blue")
 plt.legend()
