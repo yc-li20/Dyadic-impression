@@ -26,7 +26,7 @@ path_feats = '/Users/liyuanchao/Documents/Corpus/IMPRESSION/feats_labels/feats_p
 path_labels = '/Users/liyuanchao/Documents/Corpus/IMPRESSION/feats_labels/labels/'
 
 os.chdir(path_feats)
-for file in range(39):
+for file in range(40):
     with open(str(file) + '.csv') as par:
         file_content = csv.reader(par, delimiter=',')
         headers = next(file_content, None)
@@ -35,7 +35,7 @@ for file in range(39):
             ind.append(row[-1])
 
 os.chdir(path_labels)
-for file in range(39):
+for file in range(40):
     with open(str(file) + '.csv') as label:
         file_content = csv.reader(label, delimiter=',')
         headers = next(file_content, None)
@@ -43,6 +43,32 @@ for file in range(39):
             comp.append(row[0])
             warm.append(row[1])
             
+feats_test = []
+ind_test = []
+comp_test = []
+warm_test = []
+
+path_feats = '/Users/liyuanchao/Documents/Corpus/IMPRESSION/feats_labels/feats_participant/'
+path_labels = '/Users/liyuanchao/Documents/Corpus/IMPRESSION/feats_labels/labels/'
+
+os.chdir(path_feats)
+for file in range(1):
+    with open(str(file) + '.csv') as par:
+        file_content = csv.reader(par, delimiter=',')
+        headers = next(file_content, None)
+        for row in list(file_content):
+            feats_test.append(row[:-1])
+            ind_test.append(row[-1])
+
+os.chdir(path_labels)
+for file in range(1):
+    with open(str(file) + '.csv') as label:
+        file_content = csv.reader(label, delimiter=',')
+        headers = next(file_content, None)
+        for row in list(file_content):
+            comp_test.append(row[0])
+            warm_test.append(row[1])
+
 feats_par = np.array(feats_par, dtype=float)
 feats_sti = np.array(feats_sti, dtype=float)
 comp = np.array(comp, dtype=float)
@@ -60,13 +86,17 @@ ind[np.arange(leng)] = ind[indices]
 
 # separate training and validation data
 feats_train = feats_par[:int(0.8*leng)]
-feats_valid = feats_par[int(0.8*leng):]
+feats_valid = feats_par[int(0.8*leng):int(0.9*leng)]
+feats_test = feats_par[int(0.9*leng):]
 comp_train = comp[:int(0.8*leng)]
-comp_valid = comp[int(0.8*leng):]
+comp_valid = comp[int(0.8*leng):int(0.9*leng)]
+comp_test = comp[int(0.9*leng):]
 warm_train = warm[:int(0.8*leng)]
-warm_valid = warm[int(0.8*leng):]
+warm_valid = warm[int(0.8*leng):int(0.9*leng)]
+warm_test = warm[int(0.9*leng):]
 ind_train = ind[:int(0.8*leng)]
-ind_valid = ind[int(0.8*leng):]
+ind_valid = ind[int(0.8*leng):int(0.9*leng)]
+ind_test = ind[int(0.9*leng):]
 
 # normalization
 feats_train -= np.mean(feats_train, axis = 0)
@@ -75,6 +105,8 @@ feats_valid -= np.mean(feats_valid, axis = 0)
 feats_valid /= (np.std(feats_valid, axis = 0) + 0.001)
 feats_sti -= np.mean(feats_sti, axis = 0)
 feats_sti /= (np.std(feats_sti, axis = 0) + 0.001)
+feats_test -= np.mean(feats_test, axis = 0)
+feats_test /= (np.std(feats_test, axis = 0) + 0.001)
 
 feats_train = torch.from_numpy(feats_train)
 feats_valid = torch.from_numpy(feats_valid)
@@ -97,6 +129,13 @@ validdata = DataLoader(dataset=validset, batch_size=64, shuffle=False)
 
 print('Data preparation completed!')
 
+feats_test = torch.from_numpy(feats_test)
+ind_test = torch.from_numpy(ind_test)
+comp_test = torch.from_numpy(comp_test)
+warm_test = torch.from_numpy(warm_test)
+testset = TensorDataset(feats_test, ind_test, comp_test, warm_test)
+testdata = DataLoader(dataset=testset, batch_size=64, shuffle=False)
+
 # model
 class NeuralNet(nn.Module):
     def __init__(self):
@@ -116,7 +155,7 @@ class NeuralNet(nn.Module):
         self.dense = nn.Linear(128, 16)
         self.acti = nn.ReLU()
         self.out = nn.Linear(16, 1)
-
+        
     def forward(self, input_par, input_sti):
         # lstm
         self.lstm1.flatten_parameters()
@@ -146,11 +185,10 @@ class NeuralNet(nn.Module):
         warm = self.out(x_co)
         return comp, warm, loss_dis1, loss_dis2, loss_sim1, loss_sim2
     
-torch.manual_seed(1)
 model = NeuralNet()
 model = model.to(torch.float64)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
 func = nn.MSELoss()
 kl_func = nn.KLDivLoss(reduction='batchmean')
 
@@ -161,10 +199,8 @@ cross_loss_valid = []
 sim_loss_valid = []
 dis_loss_valid = []
 
-best_loss = 9.0
-
 # training
-for epoch in range(60):
+for epoch in range(30):
     start = timeit.default_timer()
     print("-----epoch: ", epoch, "-----")
     comp_loss_list_train = []
@@ -179,8 +215,17 @@ for epoch in range(60):
     dis_loss_list_valid = []
     comp_preds_train = []
     comp_preds_valid = []
+    comp_preds_test = []
     warm_preds_train = []
     warm_preds_valid = []
+    warm_preds_test = []
+    comp_preds_train_round = []
+    comp_preds_valid_round = []
+    comp_preds_test_round = []
+    warm_preds_train_round = []
+    warm_preds_valid_round = []
+    warm_preds_test_round = []        
+    
     print('--training begins--')
     model.train()
     for input_par, inds, labels_comp, labels_warm in traindata:
@@ -203,8 +248,10 @@ for epoch in range(60):
         dis_loss_list_train.append(loss_dis.item())
         for i in preds_comp:
             comp_preds_train.append(i.item())
+            comp_preds_train_round.append(round(i.item()))           
         for i in preds_warm:
             warm_preds_train.append(i.item())
+            warm_preds_train_round.append(round(i.item()))
         # backprop
         optimizer.zero_grad()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -213,7 +260,7 @@ for epoch in range(60):
         optimizer.step()
     print('--training ends--')
 
-#     # validation
+# validation
     print('--validation begins--')
     model.eval()
     input_par = feats_valid
@@ -237,19 +284,51 @@ for epoch in range(60):
         dis_loss_list_valid.append(loss_dis.item())
         for i in preds_comp:
             comp_preds_valid.append(i.item())
+            comp_preds_valid_round.append(round(i.item()))
         for i in preds_warm:
             warm_preds_valid.append(i.item())
+            warm_preds_valid_round.append(round(i.item()))
+    print('--validation ends--')
+            
+# test
+    print('--testing begins--')
+    input_par = feats_test
+    for input_par, inds, labels_comp, labels_warm in testdata:
+        input_sti = torch.tensor([])
+        for inde in inds:
+            input_sti = torch.cat((input_sti, feats_sti[inde]), 0)
+        input_par = input_par.reshape(input_par.shape[0], 1, input_par.shape[1])
+        input_sti = input_sti.reshape(input_par.shape[0], 1, -1)
+        # loss
+        preds_comp, preds_warm, _, _, _, _ = model(input_par, input_sti)
+        for i in preds_comp:
+            comp_preds_test.append(i.item())
+            comp_preds_test_round.append(round(i.item()))
+        for i in preds_warm:
+            warm_preds_test.append(i.item())
+            warm_preds_test_round.append(round(i.item()))
             
     # compute performance for each epoch
     comp_preds_train = torch.tensor(comp_preds_train)
     warm_preds_train = torch.tensor(warm_preds_train)
     comp_preds_valid = torch.tensor(comp_preds_valid)
     warm_preds_valid = torch.tensor(warm_preds_valid)
+    comp_preds_test = torch.tensor(comp_preds_test)
+    warm_preds_test = torch.tensor(warm_preds_test)
 
     train_ccc_comp = concordance_cc(comp_preds_train, comp_train)
     train_ccc_warm = concordance_cc(warm_preds_train, warm_train)
     valid_ccc_comp = concordance_cc(comp_preds_valid, comp_valid)
-    valid_ccc_warm = concordance_cc(warm_preds_valid, warm_valid)
+    valid_ccc_warm = concordance_cc(warm_preds_valid, warm_valid)    
+    test_ccc_comp = concordance_cc(comp_preds_test, comp_test)
+    test_ccc_warm = concordance_cc(warm_preds_test, warm_test)
+    
+    train_f1_comp = f1_score(comp_preds_train_round, comp_train, average='weighted')
+    train_f1_warm = f1_score(warm_preds_train_round, warm_train, average='weighted')
+    valid_f1_comp = f1_score(comp_preds_valid_round, comp_valid, average='weighted')
+    valid_f1_warm = f1_score(warm_preds_valid_round, warm_valid, average='weighted')    
+    test_f1_comp = f1_score(comp_preds_test_round, comp_test, average='weighted')
+    test_f1_warm = f1_score(warm_preds_test_round, warm_test, average='weighted')
 
     train_loss_comp = sum(comp_loss_list_train) / len(comp_loss_list_train)
     train_loss_warm = sum(warm_loss_list_train) / len(warm_loss_list_train)
@@ -269,35 +348,18 @@ for epoch in range(60):
     sim_loss_valid.append(valid_loss_sim)
     dis_loss_valid.append(valid_loss_dis)
         
-    print('train_loss_comp: %.4f' % train_loss_comp, '|train_ccc_comp: %.4f' % train_ccc_comp, '\n'
-          'train_loss_warm: %.4f' % train_loss_warm, '|train_ccc_warm: %.4f' % train_ccc_warm, '\n'
-          'valid_loss_comp: %.4f' % valid_loss_comp, '|valid_ccc_comp: %.4f' % valid_ccc_comp, '\n'
-          'valid_loss_warm: %.4f' % valid_loss_warm, '|valid_ccc_warm: %.4f' % valid_ccc_warm, '\n'
-          'train_loss_cross: %.4f' % train_loss_cross, '|valid_loss_cross: %.4f' % valid_loss_cross, '\n'
+    print('train_loss_comp: %.4f' % train_loss_comp, '|train_ccc_comp: %.4f' % train_ccc_comp, '|train_f1_comp: %.4f' % train_f1_comp, '\n'
+          'train_loss_warm: %.4f' % train_loss_warm, '|train_ccc_warm: %.4f' % train_ccc_warm, '|train_f1_warm: %.4f' % train_f1_warm, '\n'
+          'valid_loss_comp: %.4f' % valid_loss_comp, '|valid_ccc_comp: %.4f' % valid_ccc_comp, '|valid_f1_comp: %.4f' % valid_f1_comp, '\n'
+          'valid_loss_warm: %.4f' % valid_loss_warm, '|valid_ccc_warm: %.4f' % valid_ccc_warm, '|valid_f1_warm: %.4f' % valid_f1_warm, '\n'     
+#           'train_loss_cross: %.4f' % train_loss_cross, '|valid_loss_cross: %.4f' % valid_loss_cross, '\n'
           'train_loss_sim: %.4f' % train_loss_sim, '|valid_loss_sim: %.4f' % valid_loss_sim, '\n'
-          'train_loss_dis: %.4f' % train_loss_dis, '|valid_loss_dis: %.4f' % valid_loss_dis)
+          'train_loss_dis: %.4f' % train_loss_dis, '|valid_loss_dis: %.4f' % valid_loss_dis, '\n'
+          'test_ccc_comp: %.4f' % test_ccc_comp, '|test_ccc_warm: %.4f' % test_ccc_warm, '\n'
+          'test_f1_comp: %.4f' % test_f1_comp, '|test_f1_warm: %.4f' % test_f1_warm)
 
-    print('---validation ends---')
+    print('---testing ends---')
 
     stop = timeit.default_timer()
     print('Time: ', stop - start)
     scheduler.step()
-
-    if train_loss_comp+train_loss_warm < best_loss:
-        best_loss = train_loss_comp+train_loss_warm
-        torch.save(model, '/Users/liyuanchao/Desktop/phdwork/IMPRESSION/model_' + str(epoch) + '.pt')
-        print('model saved')
-        
-plt.plot(sim_loss_train, label="train", color="red")
-plt.plot(sim_loss_valid, label="valid", color="blue")
-plt.legend()
-plt.title('Similarity enhancement loss')
-plt.savefig('/Users/liyuanchao/Desktop/sim.png', dpi=400)
-plt.show()
-
-plt.plot(dis_loss_train, label="train", color="red")
-plt.plot(dis_loss_valid, label="valid", color="blue")
-plt.legend()
-plt.title('Knowledge distillation loss')
-plt.savefig('/Users/liyuanchao/Desktop/dis.png', dpi=400)
-plt.show()
